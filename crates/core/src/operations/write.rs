@@ -817,13 +817,17 @@ impl std::future::IntoFuture for WriteBuilder {
             // created actions, it may be safe to assume, that we want to include all actions.
             // then again, having only some tombstones may be misleading.
             if let Some(mut snapshot) = this.snapshot {
-                snapshot.merge(actions, &operation, version)?;
-                Ok(DeltaTable::new_with_state(this.log_store, snapshot))
-            } else {
-                let mut table = DeltaTable::new(this.log_store, Default::default());
-                table.update().await?;
-                Ok(table)
+                match snapshot.merge(actions, &operation, version) {
+                    Ok(_) => return Ok(DeltaTable::new_with_state(this.log_store, snapshot)),
+                    // A concurrent write has happened. Fall through to reading the snapshot below
+                    Err(DeltaTableError::VersionMismatch(_, _)) => {}
+                    // If it's any other error we want to return
+                    Err(e) => return Err(e),
+                }
             }
+            let mut table = DeltaTable::new(this.log_store, Default::default());
+            table.update().await?;
+            Ok(table)
         })
     }
 }

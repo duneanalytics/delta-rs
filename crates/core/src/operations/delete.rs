@@ -196,6 +196,8 @@ async fn execute(
 
     let scan_start = Instant::now();
     let candidates = find_files(&snapshot, log_store.clone(), &state, predicate.clone()).await?;
+    let scan_time = Instant::now().duration_since(scan_start).as_millis();
+    println!("Time: SCAN = {:?}", scan_time);
     metrics.scan_time_ms = Instant::now().duration_since(scan_start).as_millis();
 
     let predicate = predicate.unwrap_or(Expr::Literal(ScalarValue::Boolean(Some(true))));
@@ -214,9 +216,12 @@ async fn execute(
             writer_properties,
         )
         .await?;
+        let rewrite_time = Instant::now().duration_since(write_start).as_millis();
+        println!("Time: REWRITE = {:?}", rewrite_time);
         metrics.rewrite_time_ms = Instant::now().duration_since(write_start).as_millis();
         add
     };
+    let others = Instant::now();
     let remove = candidates.candidates;
 
     let deletion_timestamp = SystemTime::now()
@@ -265,6 +270,8 @@ async fn execute(
         .with_actions(actions)
         .build(Some(&snapshot), log_store, operation)?
         .await?;
+    let others_time = Instant::now().duration_since(others).as_millis();
+    println!("Time: OTHERS = {:?}", others_time);
     Ok((commit.snapshot(), metrics))
 }
 
@@ -288,15 +295,19 @@ impl std::future::IntoFuture for DeleteBuilder {
                 session.state()
             });
 
+            
+            println!("DeleteBuilder::into_future: predicate");
             let predicate = match this.predicate {
                 Some(predicate) => match predicate {
                     Expression::DataFusion(expr) => Some(expr),
                     Expression::String(s) => {
+                        println!("DeleteBuilder::into_future: predicate = {}", s);
                         Some(this.snapshot.parse_predicate_expression(s, &state)?)
                     }
                 },
                 None => None,
             };
+            println!("DeleteBuilder::into_future: execute");
 
             let (new_snapshot, metrics) = execute(
                 predicate,
